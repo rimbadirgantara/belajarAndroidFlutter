@@ -75,7 +75,7 @@ class _LoginForm extends State<LoginScreen> {
       await prefs.setString('imgProfil', imgUrl);
 
       Navigator.of(context).pushAndRemoveUntil(
-        MaterialPageRoute(builder: (context) => DashboardScreen()),
+        MaterialPageRoute(builder: (context) => Dashboard()),
         (route) => false,
       );
     } else {

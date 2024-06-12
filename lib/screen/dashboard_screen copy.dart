@@ -1,185 +1,318 @@
-// ignore_for_file: prefer_const_literals_to_create_immutables, use_key_in_widget_constructors, prefer_const_constructors, sized_box_for_whitespace
+// ignore_for_file: prefer_const_constructors
 
 import 'package:flutter/material.dart';
-import 'package:table_calendar/table_calendar.dart';
+import 'package:aplikasi_absen/screen/attandance_recap_screen.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:http/http.dart' as http;
+import 'dart:convert';
+import 'package:aplikasi_absen/model/presensi.dart';
+import 'package:aplikasi_absen/utils/mix.dart';
 
-class DashboardScreen extends StatefulWidget {
-  const DashboardScreen({super.key});
+class Dashboard extends StatefulWidget {
+  const Dashboard({super.key});
 
   @override
-  State<DashboardScreen> createState() => _Dashboard();
+  State<Dashboard> createState() => _DashboardState();
 }
 
-class _Dashboard extends State<DashboardScreen> {
-  late String token;
-  late String name;
-  late String dept;
-  late String imgUrl;
+class _DashboardState extends State<Dashboard> {
+  String nik = "", token = "", name = "", dept = "", imgUrl = "";
+  bool isMasuk = true;
 
   Future<void> getUserData() async {
     final prefs = await SharedPreferences.getInstance();
+    String? nik = prefs.getString('nik') ?? "";
     String? token = prefs.getString('jwt') ?? "";
     String? name = prefs.getString('name') ?? "";
     String? dept = prefs.getString('dept') ?? "";
-    String? imgUrl = prefs.getString('imgProfil') ?? "not found";
+    String? imgUrl = prefs.getString('imgProfil') ?? "Not Found";
 
     setState(() {
       this.token = token;
+      this.nik = nik;
       this.name = name;
       this.dept = dept;
       this.imgUrl = imgUrl;
     });
   }
 
+  Future<Presensi> fetchPresensi(String nik, String tanggal) async {
+    String url =
+        'https://presensi.spilme.id/presence?nik=$nik&tanggal=$tanggal';
+    final response = await http
+        .get(Uri.parse(url), headers: {'Authorization': 'Bearer $token'});
+
+    if (response.statusCode == 200) {
+      return Presensi.fromJson(jsonDecode(response.body));
+    } else {
+      //jika data tidak tersedia, buat data default
+      return Presensi(
+        id: 0,
+        nik: this.nik,
+        tanggal: getTodayDate(),
+        jamMasuk: "--:--",
+        jamKeluar: '--:--',
+        lokasiMasuk: '-',
+        lokasiKeluar: '-',
+        status: '-',
+      );
+    }
+  }
+
+  // Metode untuk menyimpan status check-in/check-out
+  Future<void> saveStatusMasuk() async {
+    final prefs = await SharedPreferences.getInstance();
+    prefs.setBool('isMasuk', isMasuk);
+  }
+
+  // Metode untuk memuat status check-in/check-out
+  Future<void> loadStatusMasuk() async {
+    final prefs = await SharedPreferences.getInstance();
+    setState(() {
+      isMasuk = prefs.getBool('isMasuk') ?? true;
+    });
+  }
+
+  Future<void> recordAttendance() async {
+    Navigator.pop(context);
+
+    const String endpointMasuk = 'https://presensi.spilme.id/entry';
+    const String endpointKeluar = 'https://presensi.spilme.id/exit';
+    final endpoint = isMasuk ? endpointMasuk : endpointKeluar;
+    final requestBody = isMasuk
+        ? {
+            'nik': nik,
+            'tanggal': getTodayDate(),
+            'jam_masuk': getTime(),
+            'lokasi_masuk': 'polbeng',
+          }
+        : {
+            'nik': nik,
+            'tanggal': getTodayDate(),
+            'jam_keluar': getTime(),
+            'lokasi_keluar': 'polbeng',
+          };
+
+    final response = await http.post(
+      Uri.parse(endpoint),
+      headers: {
+        'Authorization': 'Bearer $token',
+        'Content-Type': 'application/json',
+      },
+      body: jsonEncode(requestBody),
+    );
+
+    if (response.statusCode == 200) {
+      final responseBody = jsonDecode(response.body);
+      // ignore: use_build_context_synchronously
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(responseBody['message'])),
+      );
+      setState(() {
+        isMasuk = !isMasuk;
+        saveStatusMasuk(); // simpan status absensi
+      });
+      //refresh informasi absensi
+      fetchPresensi(nik, getTodayDate());
+    } else {
+      // ignore: use_build_context_synchronously
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Failed to record attendance')),
+      );
+    }
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    getUserData();
+    loadStatusMasuk();
+  }
+
   @override
   Widget build(BuildContext context) {
-    return MaterialApp(
-      debugShowCheckedModeBanner: false,
-      home: Scaffold(
-        body: SafeArea(
-          child: Padding(
-            padding: EdgeInsets.all(20.0),
-            child: Column(
-              children: <Widget>[
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: <Widget>[
-                    ClipRRect(
-                        borderRadius: BorderRadius.circular(50),
-                        child: Image.network(imgUrl,
-                            height: 84, fit: BoxFit.cover)),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: <Widget>[
-                          Text(
-                            name,
-                            style: TextStyle(
-                              fontWeight: FontWeight.bold,
-                              fontSize: 18,
-                            ),
-                          ),
-                          Text(dept, style: TextStyle(fontSize: 15)),
-                        ],
-                      ),
-                    ),
-                    Icon(Icons.notifications_outlined, size: 40),
-                  ],
-                ),
-                SizedBox(
-                  height: 10,
-                ),
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    Text(
-                      "Kehadiran Hari Ini",
-                      style:
-                          TextStyle(fontWeight: FontWeight.bold, fontSize: 15),
-                    ),
-                    GestureDetector(
-                        onTap: () {
-                          Navigator.push(
-                            context,
-                            MaterialPageRoute(
-                                builder: (context) => RiwayatAbsen()),
-                          );
+    return Scaffold(
+      body: SafeArea(
+        child: Padding(
+          padding: EdgeInsets.all(20),
+          child: Column(
+            children: <Widget>[
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: <Widget>[
+                  ClipRRect(
+                      borderRadius: BorderRadius.circular(50),
+                      child: Image.network(
+                        imgUrl,
+                        height: 64,
+                        fit: BoxFit.cover,
+                        errorBuilder: (context, error, stackTrace) {
+                          return const Icon(Icons
+                              .error); // Display error icon if image fails to load
                         },
-                        child: Text(
-                          "Rekap Absen",
-                          style: TextStyle(color: Colors.blue, fontSize: 15),
-                        ))
-                  ],
-                ),
-                SizedBox(height: 15),
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    Container(
-                      width: 170,
-                      height: 140,
-                      decoration: BoxDecoration(
-                        borderRadius:
-                            BorderRadius.circular(10), // Mengatur sudut bulat
-                        border: Border.all(
-                            color: Colors.grey,
-                            width: 1), // Mengatur garis tepi
-                      ),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: <Widget>[
-                          ListTile(
-                            leading: Icon(Icons.arrow_circle_right_outlined,
-                                size: 35),
-                            title: Text(
-                              'Masuk',
-                              style: TextStyle(fontSize: 18),
-                            ),
+                      )),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: <Widget>[
+                        Text(
+                          name,
+                          style: TextStyle(
+                            fontWeight: FontWeight.bold,
+                            fontSize: 18,
                           ),
-                          Row(
-                            children: [
-                              SizedBox(width: 15),
-                              Text("07:00",
-                                  style: TextStyle(
-                                      fontSize: 22,
-                                      fontWeight: FontWeight.bold)),
-                            ],
-                          ),
-                          Row(
-                            children: [
-                              SizedBox(width: 15),
-                              Text("Tepat Waktu")
-                            ],
-                          )
-                        ],
-                      ),
+                        ),
+                        Text(dept, style: TextStyle(fontSize: 15)),
+                      ],
                     ),
-                    Container(
-                      width: 170,
-                      height: 140,
-                      decoration: BoxDecoration(
-                        borderRadius:
-                            BorderRadius.circular(10), // Mengatur sudut bulat
-                        border: Border.all(
-                            color: Colors.grey,
-                            width: 1), // Mengatur garis tepi
-                      ),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: <Widget>[
-                          ListTile(
-                            leading: Icon(Icons.arrow_circle_right_outlined,
-                                size: 35),
-                            title: Text(
-                              'Keluar',
-                              style: TextStyle(fontSize: 18),
+                  ),
+                  Icon(Icons.notifications_outlined, size: 40),
+                ],
+              ),
+              SizedBox(
+                height: 10,
+              ),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Text(
+                    "Kehadiran Hari Ini",
+                    style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15),
+                  ),
+                  GestureDetector(
+                      onTap: () {
+                        Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                              builder: (context) => const RiwayatAbsen()),
+                        );
+                      },
+                      child: Text(
+                        "Rekap Absen",
+                        style: TextStyle(color: Colors.blue, fontSize: 15),
+                      ))
+                ],
+              ),
+              SizedBox(height: 15),
+              FutureBuilder<Presensi>(
+                  future: fetchPresensi(nik, getTodayDate()),
+                  builder: (context, snapshot) {
+                    if (snapshot.connectionState == ConnectionState.waiting) {
+                      return const Center(child: CircularProgressIndicator());
+                    } else if (snapshot.hasError) {
+                      return Center(child: Text('Error: ${snapshot.error}'));
+                    } else if (snapshot.hasData) {
+                      final data = snapshot.data;
+                      return Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          Expanded(
+                            child: Container(
+                              width: 170,
+                              height: 140,
+                              decoration: BoxDecoration(
+                                borderRadius: BorderRadius.circular(
+                                    10), // Mengatur sudut bulat
+                                border: Border.all(
+                                    color: Colors.grey,
+                                    width: 1), // Mengatur garis tepi
+                              ),
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: <Widget>[
+                                  ListTile(
+                                    leading: Icon(
+                                        Icons.arrow_circle_right_outlined,
+                                        size: 35),
+                                    title: Text(
+                                      'Masuk',
+                                      style: TextStyle(fontSize: 18),
+                                    ),
+                                  ),
+                                  Row(
+                                    children: [
+                                      SizedBox(width: 15),
+                                      Text(data?.jamMasuk ?? '--:--',
+                                          style: TextStyle(
+                                              fontSize: 22,
+                                              fontWeight: FontWeight.bold)),
+                                    ],
+                                  ),
+                                  Row(
+                                    children: [
+                                      SizedBox(width: 15),
+                                      Text(
+                                        getPresenceEntryStatus(
+                                            data?.jamMasuk ?? '-'),
+                                      )
+                                    ],
+                                  )
+                                ],
+                              ),
                             ),
                           ),
-                          Row(
-                            children: [
-                              SizedBox(width: 15),
-                              Text("-- : --",
-                                  style: TextStyle(
-                                      fontSize: 22,
-                                      fontWeight: FontWeight.bold)),
-                            ],
+                          const SizedBox(
+                            width: 10,
                           ),
-                          Row(
-                            children: [SizedBox(width: 15), Text("Pulang")],
-                          )
+                          Expanded(
+                              child: Container(
+                            width: 170,
+                            height: 140,
+                            decoration: BoxDecoration(
+                              borderRadius: BorderRadius.circular(
+                                  10), // Mengatur sudut bulat
+                              border: Border.all(
+                                  color: Colors.grey,
+                                  width: 1), // Mengatur garis tepi
+                            ),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: <Widget>[
+                                ListTile(
+                                  leading: Icon(
+                                      Icons.arrow_circle_right_outlined,
+                                      size: 35),
+                                  title: Text(
+                                    'Keluar',
+                                    style: TextStyle(fontSize: 18),
+                                  ),
+                                ),
+                                Row(
+                                  children: [
+                                    SizedBox(width: 15),
+                                    Text(data?.jamKeluar ?? '--:--',
+                                        style: TextStyle(
+                                            fontSize: 22,
+                                            fontWeight: FontWeight.bold)),
+                                  ],
+                                ),
+                                Row(
+                                  children: [
+                                    SizedBox(width: 15),
+                                    Text(
+                                      getPresenceExitStatus(
+                                          data?.jamKeluar ?? '-'),
+                                    )
+                                  ],
+                                )
+                              ],
+                            ),
+                          ))
                         ],
-                      ),
-                    )
-                  ],
-                ),
-                SizedBox(
-                  height: 15,
-                ),
-                Row(
-                  children: <Widget>[
-                    Container(
-                      width: 364,
+                      );
+                    } else {
+                      return const Center(child: Text("No Data Available"));
+                    }
+                  }),
+              SizedBox(
+                height: 15,
+              ),
+              Row(
+                children: <Widget>[
+                  Expanded(
+                    child: SizedBox(
+                      width: 350,
                       child: ElevatedButton(
                         style: ElevatedButton.styleFrom(
                           backgroundColor: Colors.blue,
@@ -194,11 +327,11 @@ class _Dashboard extends State<DashboardScreen> {
                             context: context,
                             isScrollControlled: true,
                             builder: (BuildContext context) {
-                              return Container(
+                              return SizedBox(
                                 height:
-                                    MediaQuery.of(context).size.height * 0.8,
+                                    MediaQuery.of(context).size.height * 0.9,
                                 child: Padding(
-                                    padding: EdgeInsets.all(20.0),
+                                    padding: EdgeInsets.all(20),
                                     child: Column(
                                       children: <Widget>[
                                         SizedBox(
@@ -207,7 +340,7 @@ class _Dashboard extends State<DashboardScreen> {
                                         Row(
                                           children: <Widget>[
                                             Text(
-                                              'Presensi Masuk',
+                                              'Presensi ${isMasuk ? 'Masuk' : 'Pulang'}',
                                               style: TextStyle(
                                                   fontWeight: FontWeight.bold,
                                                   fontSize: 25),
@@ -219,7 +352,7 @@ class _Dashboard extends State<DashboardScreen> {
                                         ),
                                         Row(
                                           children: <Widget>[
-                                            Icon(
+                                            const Icon(
                                               Icons.calendar_month_outlined,
                                               color: Colors.red,
                                             ),
@@ -239,7 +372,7 @@ class _Dashboard extends State<DashboardScreen> {
                                                       fontSize: 18,
                                                     ),
                                                   ),
-                                                  Text("Senin, 23 Agustus 2023",
+                                                  Text(getTodayDate(),
                                                       style: TextStyle(
                                                           fontSize: 15,
                                                           color: Colors.grey)),
@@ -253,7 +386,7 @@ class _Dashboard extends State<DashboardScreen> {
                                         ),
                                         Row(
                                           children: <Widget>[
-                                            Icon(
+                                            const Icon(
                                               Icons.schedule_outlined,
                                               color: Colors.red,
                                             ),
@@ -273,7 +406,7 @@ class _Dashboard extends State<DashboardScreen> {
                                                       fontSize: 18,
                                                     ),
                                                   ),
-                                                  Text("07:03:23",
+                                                  Text(getTime(),
                                                       style: TextStyle(
                                                           fontSize: 15,
                                                           color: Colors.grey)),
@@ -298,72 +431,82 @@ class _Dashboard extends State<DashboardScreen> {
                                         ),
                                         Row(
                                           children: <Widget>[
-                                            Container(
-                                              width: 343,
-                                              height: 350,
-                                              decoration: BoxDecoration(
-                                                borderRadius:
-                                                    BorderRadius.circular(
-                                                        8), // Mengatur sudut bulat
-                                                border: Border.all(
-                                                    color: Colors.grey,
-                                                    width:
-                                                        2), // Mengatur garis tepi
+                                            Expanded(
+                                              child: Container(
+                                                width: MediaQuery.of(context)
+                                                        .size
+                                                        .width *
+                                                    0.5,
+                                                height: MediaQuery.of(context)
+                                                        .size
+                                                        .height *
+                                                    0.48,
+                                                decoration: BoxDecoration(
+                                                  borderRadius:
+                                                      BorderRadius.circular(
+                                                          8), // Mengatur sudut bulat
+                                                  border: Border.all(
+                                                      color: Colors.grey,
+                                                      width:
+                                                          2), // Mengatur garis tepi
+                                                ),
+                                                child: Column(
+                                                  mainAxisAlignment:
+                                                      MainAxisAlignment.center,
+                                                  crossAxisAlignment:
+                                                      CrossAxisAlignment.center,
+                                                  children: <Widget>[
+                                                    Icon(
+                                                      Icons.camera_alt,
+                                                      size: 50,
+                                                    ),
+                                                    SizedBox(
+                                                      height: 10,
+                                                    ),
+                                                    Text("Ambil Gambar",
+                                                        style: TextStyle(
+                                                            fontSize: 18))
+                                                  ],
+                                                ),
                                               ),
-                                              child: Column(
-                                                mainAxisAlignment:
-                                                    MainAxisAlignment.center,
-                                                crossAxisAlignment:
-                                                    CrossAxisAlignment.center,
-                                                children: <Widget>[
-                                                  Icon(
-                                                    Icons.camera_alt,
-                                                    size: 50,
-                                                  ),
-                                                  SizedBox(
-                                                    height: 10,
-                                                  ),
-                                                  Text("Ambil Gambar",
-                                                      style: TextStyle(
-                                                          fontSize: 18))
-                                                ],
-                                              ),
-                                            ),
+                                            )
                                           ],
                                         ),
                                         SizedBox(
-                                          height: 15,
+                                          height: 10,
                                         ),
                                         Row(
                                           children: <Widget>[
-                                            ElevatedButton(
-                                              style: ElevatedButton.styleFrom(
-                                                backgroundColor: Colors.blue,
-                                                minimumSize: Size(343, 50),
-                                                padding: EdgeInsets.symmetric(
-                                                    horizontal: 20,
-                                                    vertical: 10),
-                                                shape: RoundedRectangleBorder(
-                                                    borderRadius:
-                                                        BorderRadius.circular(
-                                                            10)),
+                                            Expanded(
+                                              child: ElevatedButton(
+                                                style: ElevatedButton.styleFrom(
+                                                  backgroundColor: Colors.blue,
+                                                  minimumSize: Size(350, 50),
+                                                  padding: EdgeInsets.symmetric(
+                                                      horizontal: 20,
+                                                      vertical: 10),
+                                                  shape: RoundedRectangleBorder(
+                                                      borderRadius:
+                                                          BorderRadius.circular(
+                                                              10)),
+                                                ),
+                                                onPressed: () {},
+                                                child: Row(
+                                                  mainAxisAlignment:
+                                                      MainAxisAlignment.center,
+                                                  children: <Widget>[
+                                                    Text(
+                                                      "Hadir",
+                                                      style: TextStyle(
+                                                          color: Colors.white,
+                                                          fontWeight:
+                                                              FontWeight.bold,
+                                                          fontSize: 15),
+                                                    )
+                                                  ],
+                                                ),
                                               ),
-                                              onPressed: () {},
-                                              child: Row(
-                                                mainAxisAlignment:
-                                                    MainAxisAlignment.center,
-                                                children: <Widget>[
-                                                  Text(
-                                                    "Hadir",
-                                                    style: TextStyle(
-                                                        color: Colors.white,
-                                                        fontWeight:
-                                                            FontWeight.bold,
-                                                        fontSize: 15),
-                                                  )
-                                                ],
-                                              ),
-                                            ),
+                                            )
                                           ],
                                         )
                                       ],
@@ -375,13 +518,13 @@ class _Dashboard extends State<DashboardScreen> {
                         child: Row(
                           mainAxisAlignment: MainAxisAlignment.center,
                           children: <Widget>[
-                            Icon(
+                            const Icon(
                               Icons.circle_outlined,
                               color: Colors.white,
                             ),
                             SizedBox(width: 5),
                             Text(
-                              "Tekan untuk Presensi Keluar",
+                              "Tekan untuk presensi ${isMasuk ? 'masuk' : 'pulang'}",
                               style: TextStyle(
                                   color: Colors.white,
                                   fontWeight: FontWeight.bold,
@@ -391,34 +534,36 @@ class _Dashboard extends State<DashboardScreen> {
                         ),
                       ),
                     ),
-                  ],
-                ),
-                SizedBox(
-                  height: 15,
-                ),
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: <Widget>[
-                    Container(
+                  ),
+                ],
+              ),
+              SizedBox(
+                height: 15,
+              ),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: <Widget>[
+                  Expanded(
+                    child: Container(
                       width: 170,
                       height: 190,
                       decoration: BoxDecoration(
                           borderRadius:
                               BorderRadius.circular(10), // Mengatur sudut bulat
-                          gradient: LinearGradient(
+                          gradient: const LinearGradient(
                             begin: Alignment.topLeft,
                             end: Alignment.bottomRight,
                             colors: [
-                              const Color.fromARGB(255, 28, 28, 28),
-                              const Color.fromARGB(255, 110, 110, 110),
-                              const Color.fromARGB(255, 110, 110, 110),
-                              const Color.fromARGB(255, 110, 110, 110),
-                              const Color.fromARGB(255, 28, 28, 28),
+                              Colors.black,
+                              Colors.grey,
+                              Colors.grey,
+                              Colors.grey,
+                              Colors.black,
                             ],
                           ) // Mengatur garis tepi
                           ),
                       child: Padding(
-                        padding: EdgeInsets.all(13.0),
+                        padding: const EdgeInsets.all(13.0),
                         child: Column(
                           children: <Widget>[
                             Row(
@@ -458,7 +603,7 @@ class _Dashboard extends State<DashboardScreen> {
                             Row(
                               mainAxisAlignment: MainAxisAlignment.center,
                               children: <Widget>[
-                                Container(
+                                SizedBox(
                                   width: 130,
                                   child: Column(
                                     children: <Widget>[
@@ -495,13 +640,18 @@ class _Dashboard extends State<DashboardScreen> {
                         ),
                       ),
                     ),
-                    Container(
+                  ),
+                  const SizedBox(
+                    width: 10,
+                  ),
+                  Expanded(
+                    child: Container(
                       width: 170,
                       height: 190,
                       decoration: BoxDecoration(
                           borderRadius:
                               BorderRadius.circular(10), // Mengatur sudut bulat
-                          gradient: LinearGradient(
+                          gradient: const LinearGradient(
                             begin: Alignment.topLeft,
                             end: Alignment.bottomRight,
                             colors: [
@@ -514,7 +664,7 @@ class _Dashboard extends State<DashboardScreen> {
                           ) // Mengatur garis tepi
                           ),
                       child: Padding(
-                        padding: EdgeInsets.all(13.0),
+                        padding: const EdgeInsets.all(13.0),
                         child: Column(
                           children: <Widget>[
                             Row(
@@ -554,7 +704,7 @@ class _Dashboard extends State<DashboardScreen> {
                             Row(
                               mainAxisAlignment: MainAxisAlignment.center,
                               children: <Widget>[
-                                Container(
+                                SizedBox(
                                   width: 130,
                                   child: Column(
                                     children: <Widget>[
@@ -591,379 +741,13 @@ class _Dashboard extends State<DashboardScreen> {
                         ),
                       ),
                     ),
-                  ],
-                ),
-              ],
-            ),
+                  ),
+                ],
+              ),
+            ],
           ),
         ),
       ),
-    );
-  }
-}
-
-class RiwayatAbsen extends StatelessWidget {
-  @override
-  Widget build(BuildContext context) {
-    return MaterialApp(
-      debugShowCheckedModeBanner: false,
-      home: Scaffold(
-        body: SafeArea(
-          child: Padding(
-            padding: EdgeInsets.all(20.0),
-            child: Column(
-              children: <Widget>[
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: <Widget>[
-                    IconButton(
-                      onPressed: () {
-                        Navigator.pop(context);
-                      },
-                      icon: Icon(Icons.arrow_back_ios_outlined, size: 40),
-                    ),
-                    SizedBox(
-                      width: 20,
-                    ),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: <Widget>[
-                          Text(
-                            "Riwayat Absensi",
-                            style: TextStyle(
-                              fontWeight: FontWeight.bold,
-                              fontSize: 22,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ],
-                ),
-                SizedBox(
-                  height: 10,
-                ),
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    Container(
-                      width: 170,
-                      height: 90,
-                      decoration: BoxDecoration(
-                        borderRadius:
-                            BorderRadius.circular(10), // Mengatur sudut bulat
-                        border: Border.all(color: Colors.blue, width: 1),
-                        color: Colors.lightBlueAccent.withOpacity(0.2),
-                      ),
-                      child: Padding(
-                        padding: EdgeInsets.all(13.0),
-                        child: Column(
-                          children: <Widget>[
-                            Row(
-                              children: <Widget>[
-                                Text(
-                                  "Jumlah Izin",
-                                  style: TextStyle(
-                                      fontSize: 18,
-                                      fontWeight: FontWeight.bold,
-                                      color: Colors.black),
-                                )
-                              ],
-                            ),
-                            SizedBox(
-                              height: 5,
-                            ),
-                            Row(
-                              children: <Widget>[
-                                Text(
-                                  "0",
-                                  style: TextStyle(
-                                      fontSize: 18,
-                                      fontWeight: FontWeight.bold,
-                                      color: Colors.blue),
-                                )
-                              ],
-                            )
-                          ],
-                        ),
-                      ),
-                    ),
-                    Container(
-                      width: 170,
-                      height: 90,
-                      decoration: BoxDecoration(
-                        borderRadius:
-                            BorderRadius.circular(10), // Mengatur sudut bulat
-                        border: Border.all(color: Colors.green, width: 1),
-                        color: Colors.lightGreenAccent.withOpacity(0.2),
-                      ),
-                      child: Padding(
-                        padding: EdgeInsets.all(13.0),
-                        child: Column(
-                          children: <Widget>[
-                            Row(
-                              children: <Widget>[
-                                Text(
-                                  "Jumlah Hadir",
-                                  style: TextStyle(
-                                      fontSize: 18,
-                                      fontWeight: FontWeight.bold,
-                                      color: Colors.black),
-                                )
-                              ],
-                            ),
-                            SizedBox(
-                              height: 5,
-                            ),
-                            Row(
-                              children: <Widget>[
-                                Text(
-                                  "0",
-                                  style: TextStyle(
-                                      fontSize: 18,
-                                      fontWeight: FontWeight.bold,
-                                      color: Colors.green),
-                                )
-                              ],
-                            )
-                          ],
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-                SizedBox(
-                  height: 10,
-                ),
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    Container(
-                      width: 170,
-                      height: 90,
-                      decoration: BoxDecoration(
-                        borderRadius:
-                            BorderRadius.circular(10), // Mengatur sudut bulat
-                        border: Border.all(color: Colors.purple, width: 1),
-                        color: Colors.purpleAccent.withOpacity(0.2),
-                      ),
-                      child: Padding(
-                        padding: EdgeInsets.all(13.0),
-                        child: Column(
-                          children: <Widget>[
-                            Row(
-                              children: <Widget>[
-                                Text(
-                                  "Jumlah Sakit",
-                                  style: TextStyle(
-                                      fontSize: 18,
-                                      fontWeight: FontWeight.bold,
-                                      color: Colors.black),
-                                )
-                              ],
-                            ),
-                            SizedBox(
-                              height: 5,
-                            ),
-                            Row(
-                              children: <Widget>[
-                                Text(
-                                  "1",
-                                  style: TextStyle(
-                                      fontSize: 18,
-                                      fontWeight: FontWeight.bold,
-                                      color: Colors.purple),
-                                )
-                              ],
-                            )
-                          ],
-                        ),
-                      ),
-                    ),
-                    Container(
-                      width: 170,
-                      height: 90,
-                      decoration: BoxDecoration(
-                        borderRadius:
-                            BorderRadius.circular(10), // Mengatur sudut bulat
-                        border: Border.all(color: Colors.red, width: 1),
-                        color: Colors.redAccent.withOpacity(0.2),
-                      ),
-                      child: Padding(
-                        padding: EdgeInsets.all(13.0),
-                        child: Column(
-                          children: <Widget>[
-                            Row(
-                              children: <Widget>[
-                                Text(
-                                  "Jumlah Alpa",
-                                  style: TextStyle(
-                                      fontSize: 18,
-                                      fontWeight: FontWeight.bold,
-                                      color: Colors.black),
-                                )
-                              ],
-                            ),
-                            SizedBox(
-                              height: 5,
-                            ),
-                            Row(
-                              children: <Widget>[
-                                Text(
-                                  "0",
-                                  style: TextStyle(
-                                      fontSize: 18,
-                                      fontWeight: FontWeight.bold,
-                                      color: Colors.red),
-                                )
-                              ],
-                            )
-                          ],
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-                SizedBox(
-                  height: 10,
-                ),
-                Row(
-                  children: <Widget>[
-                    Expanded(
-                      child: TableCalendar(
-                        focusedDay: DateTime.now(),
-                        firstDay: DateTime.utc(2024),
-                        lastDay: DateTime.utc(9999, 12, 31),
-                        headerStyle: HeaderStyle(
-                          formatButtonVisible: false,
-                          titleCentered: true,
-                          titleTextStyle:
-                              TextStyle(fontWeight: FontWeight.bold),
-                        ),
-                        calendarStyle: CalendarStyle(
-                          defaultTextStyle: TextStyle(
-                              color:
-                                  Colors.black), // Mengatur warna teks default
-                          todayTextStyle: TextStyle(
-                              color: Colors
-                                  .deepPurpleAccent), // Mengatur warna teks hari ini
-                          selectedTextStyle: TextStyle(
-                              color: Colors
-                                  .black), // Mengatur warna teks yang dipilih
-                          weekendTextStyle: TextStyle(color: Colors.red),
-                          outsideTextStyle: TextStyle(
-                              color: Colors
-                                  .black), // Mengatur gaya teks untuk tanggal di luar bulan yang sedang ditampilkan
-                        ),
-                        weekendDays: [
-                          DateTime.sunday
-                        ], // Mengatur hari Minggu sebagai akhir pekan
-                      ),
-                    ),
-                  ],
-                ),
-                SizedBox(
-                  height: 10,
-                ),
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: <Widget>[
-                    Text(
-                      "Aktivitas",
-                      style:
-                          TextStyle(fontWeight: FontWeight.bold, fontSize: 15),
-                    ),
-                    Text(
-                      "Lihat Semua",
-                      style: TextStyle(color: Colors.blue, fontSize: 15),
-                    ),
-                  ],
-                )
-              ],
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-class MyHomePage extends StatefulWidget {
-  const MyHomePage({super.key, required this.title});
-
-  final String title;
-
-  @override
-  State<MyHomePage> createState() => _MyHomePageState();
-}
-
-class _MyHomePageState extends State<MyHomePage> {
-  int _counter = 0;
-
-  void _incrementCounter() {
-    setState(() {
-      // This call to setState tells the Flutter framework that something has
-      // changed in this State, which causes it to rerun the build method below
-      // so that the display can reflect the updated values. If we changed
-      // _counter without calling setState(), then the build method would not be
-      // called again, and so nothing would appear to happen.
-      _counter++;
-    });
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    // This method is rerun every time setState is called, for instance as done
-    // by the _incrementCounter method above.
-    //
-    // The Flutter framework has been optimized to make rerunning build methods
-    // fast, so that you can just rebuild anything that needs updating rather
-    // than having to individually change instances of widgets.
-    return Scaffold(
-      appBar: AppBar(
-        // TRY THIS: Try changing the color here to a specific color (to
-        // Colors.amber, perhaps?) and trigger a hot reload to see the AppBar
-        // change color while the other colors stay the same.
-        backgroundColor: Theme.of(context).colorScheme.inversePrimary,
-        // Here we take the value from the MyHomePage object that was created by
-        // the App.build method, and use it to set our appbar title.
-        title: Text(widget.title),
-      ),
-      body: Center(
-        // Center is a layout widget. It takes a single child and positions it
-        // in the middle of the parent.
-        child: Column(
-          // Column is also a layout widget. It takes a list of children and
-          // arranges them vertically. By default, it sizes itself to fit its
-          // children horizontally, and tries to be as tall as its parent.
-          //
-          // Column has various properties to control how it sizes itself and
-          // how it positions its children. Here we use mainAxisAlignment to
-          // center the children vertically; the main axis here is the vertical
-          // axis because Columns are vertical (the cross axis would be
-          // horizontal).
-          //
-          // TRY THIS: Invoke "debug painting" (choose the "Toggle Debug Paint"
-          // action in the IDE, or press "p" in the console), to see the
-          // wireframe for each widget.
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: <Widget>[
-            const Text(
-              'You have pushed the button this many times:',
-            ),
-            Text(
-              '$_counter',
-              style: Theme.of(context).textTheme.headlineMedium,
-            ),
-          ],
-        ),
-      ),
-      floatingActionButton: FloatingActionButton(
-        onPressed: _incrementCounter,
-        tooltip: 'Increment',
-        child: const Icon(Icons.add),
-      ), // This trailing comma makes auto-formatting nicer for build methods.
     );
   }
 }
