@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:aplikasi_absen/screen/attandance_recap_screen.dart';
+import 'package:aplikasi_absen/screen/log_activity_screen/logs_home_screen.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
@@ -743,6 +744,51 @@ class _DashboardState extends State<Dashboard> {
                   ),
                 ],
               ),
+              SizedBox(height: 15),
+              Row(
+                children: [
+                  Expanded(
+                    child: SizedBox(
+                      width: 350,
+                      child: ElevatedButton(
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: Colors.blue,
+                          minimumSize: Size(350, 50),
+                          padding: EdgeInsets.symmetric(
+                              horizontal: 20, vertical: 10),
+                          shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(10)),
+                        ),
+                        onPressed: () {
+                          Navigator.push(
+                            context,
+                            MaterialPageRoute(
+                                builder: (context) =>
+                                    LogsActivityScreen(nik: nik, token: token)),
+                          );
+                        },
+                        child: Row(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: <Widget>[
+                            const Icon(
+                              Icons.circle_outlined,
+                              color: Colors.white,
+                            ),
+                            SizedBox(width: 5),
+                            Text(
+                              "Tekan untuk Melihat Log",
+                              style: TextStyle(
+                                  color: Colors.white,
+                                  fontWeight: FontWeight.bold,
+                                  fontSize: 15),
+                            )
+                          ],
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
+              )
             ],
           ),
         ),
